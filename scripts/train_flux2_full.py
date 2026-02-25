@@ -34,7 +34,6 @@ image = modal.Image.debian_slim(python_version="3.10").pip_install(
     "numpy<2",
     "peft>=0.17.0",
     "pillow>=10.0.0",
-    "pylance>=2.0.0",
     "pydantic==2.9.2",
     "sentencepiece>=0.1.91,!=0.1.92",
     "smart_open~=6.4.0",
@@ -146,66 +145,10 @@ class TrainConfig(SharedConfig):
     seed: int = 42
 
 
-HF_TRAINING_DATASET = "makeshifted/zero-obstacle-high-density-z01-training"
-
-
-def prepare_training_data(hf_dataset: str) -> str:
-    """Download the Lance dataset from HuggingFace, convert to a proper
-    HuggingFace datasets repo with paired images, and push it so the
-    DreamBooth training script can load it via datasets.load_dataset().
-
-    The img2img script expects columns:
-        - cond_image: the input/condition image (connection-pairs)
-        - output_image: the target image (routed)
-        - instruction: the edit instruction text
-
-    Returns the HuggingFace dataset repo ID.
-    """
-    import io
-
-    import lance as lance_lib
-    from datasets import Dataset, Image
-    from PIL import Image as PILImage
-
-    print(f"Loading Lance dataset from hf://datasets/{hf_dataset}/data/train.lance")
-    ds = lance_lib.dataset(f"hf://datasets/{hf_dataset}/data/train.lance")
-    rows = ds.to_table().to_pylist()
-    print(f"Loaded {len(rows)} training samples")
-
-    cond_images = []
-    output_images = []
-    instructions = []
-
-    for row in rows:
-        cond_img = PILImage.open(io.BytesIO(row["input_image"])).convert("RGB")
-        out_img = PILImage.open(io.BytesIO(row["output_image"])).convert("RGB")
-
-        # Resize to training resolution if needed
-        target_size = (256, 256)
-        if cond_img.size != target_size:
-            cond_img = cond_img.resize(target_size, PILImage.LANCZOS)
-        if out_img.size != target_size:
-            out_img = out_img.resize(target_size, PILImage.LANCZOS)
-
-        cond_images.append(cond_img)
-        output_images.append(out_img)
-        instructions.append(row["edit_instruction"])
-
-    hf_ds = Dataset.from_dict(
-        {
-            "cond_image": cond_images,
-            "output_image": output_images,
-            "instruction": instructions,
-        }
-    )
-    hf_ds = hf_ds.cast_column("cond_image", Image())
-    hf_ds = hf_ds.cast_column("output_image", Image())
-
-    print(f"Pushing {len(rows)} paired samples to {HF_TRAINING_DATASET} ...")
-    hf_ds.push_to_hub(HF_TRAINING_DATASET, split="train")
-    print(f"Dataset available at: https://huggingface.co/datasets/{HF_TRAINING_DATASET}")
-
-    return HF_TRAINING_DATASET
+    # HuggingFace datasets repo with paired images (cond_image, output_image,
+    # instruction columns) pre-pushed by convert_to_lance.py.
+    # The DreamBooth script loads this via datasets.load_dataset().
+    hf_training_dataset: str = "makeshifted/zero-obstacle-high-density-z01-training"
 
 
 @app.function(
@@ -231,9 +174,6 @@ def train(config):
 
     write_basic_config(mixed_precision="bf16")
 
-    # Convert Lance dataset to HuggingFace datasets format and push to Hub
-    dataset_repo = prepare_training_data(config.hf_dataset)
-
     def _exec_subprocess(cmd: list[str]):
         """Executes subprocess and prints log to terminal while subprocess is running."""
         process = subprocess.Popen(
@@ -258,7 +198,7 @@ def train(config):
             "examples/dreambooth/train_dreambooth_flux2_klein_img2img_full.py",
             "--mixed_precision=bf16",
             f"--pretrained_model_name_or_path={MODEL_DIR}",
-            f"--dataset_name={dataset_repo}",
+            f"--dataset_name={config.hf_training_dataset}",
             f"--output_dir={OUTPUT_DIR}",
             "--image_column=output_image",
             "--cond_image_column=cond_image",
