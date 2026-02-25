@@ -1,5 +1,6 @@
 import { appendFile, mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { parseArgs } from "node:util"
 
 import {
   type GeneratedProblem,
@@ -16,8 +17,23 @@ import {
 } from "../lib/generator-params.ts"
 import { solveProblem } from "../lib/solve-problem.ts"
 
-const sampleCount = parseSampleCount(process.argv[2])
-const outputDir = process.argv[3] ?? "dataset"
+const { values: args } = parseArgs({
+  options: {
+    "sample-count": { type: "string" },
+    "output-dir": { type: "string" },
+  },
+  strict: true,
+})
+
+if (!args["sample-count"]) {
+  throw new Error("Missing required flag: --sample-count")
+}
+if (!args["output-dir"]) {
+  throw new Error("Missing required flag: --output-dir")
+}
+
+const sampleCount = parsePositiveInt(args["sample-count"])
+const outputDir = args["output-dir"]
 const failures: Array<{ problemId: string; reason: string }> = []
 const pairCountBySampleIndex = new Map<number, number>()
 
@@ -122,15 +138,13 @@ if (solvedCount < sampleCount) {
 
 console.log(`dataset written to ${jsonlPath}`)
 
-function parseSampleCount(rawArg: string | undefined): number {
-  const parsed = Number(rawArg ?? "100")
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    throw new Error(
-      `Invalid sample count: ${rawArg ?? "<empty>"}. Usage: bun scripts/generate-dataset.ts <count> [outputDir]`,
-    )
+function parsePositiveInt(raw: string): number {
+  const value = Number(raw)
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`Expected positive integer, got: ${raw}`)
   }
 
-  return Math.floor(parsed)
+  return Math.floor(value)
 }
 
 function getOrCreatePairCount(sampleIndex: number): number {

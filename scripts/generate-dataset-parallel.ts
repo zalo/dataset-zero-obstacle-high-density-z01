@@ -40,6 +40,10 @@ type WorkerResult = {
   attempts: number
 }
 
+type WorkerMessage =
+  | { type: "progress" }
+  | ({ type: "done" } & WorkerResult)
+
 type DatasetRowWithId = DatasetRow & { id: string }
 
 if (isMainThread) {
@@ -49,21 +53,28 @@ if (isMainThread) {
 }
 
 async function runMainThread(): Promise<void> {
-  const { values: args, positionals } = parseArgs({
+  const { values: args } = parseArgs({
     options: {
       "sample-count": { type: "string" },
       "output-dir": { type: "string" },
       concurrency: { type: "string" },
     },
     strict: true,
-    allowPositionals: true,
   })
 
-  const sampleCount = parsePositiveInt(
-    args["sample-count"] ?? positionals[0] ?? "100",
-  )
-  const outputDir = args["output-dir"] ?? positionals[1] ?? "dataset"
-  const concurrency = parsePositiveInt(args.concurrency ?? "1")
+  if (!args["sample-count"]) {
+    throw new Error("Missing required flag: --sample-count")
+  }
+  if (!args["output-dir"]) {
+    throw new Error("Missing required flag: --output-dir")
+  }
+  if (!args.concurrency) {
+    throw new Error("Missing required flag: --concurrency")
+  }
+
+  const sampleCount = parsePositiveInt(args["sample-count"])
+  const outputDir = args["output-dir"]
+  const concurrency = parsePositiveInt(args.concurrency)
   const effectiveConcurrency = Math.min(sampleCount, concurrency)
 
   const imagesDir = join(outputDir, "images")
@@ -71,11 +82,21 @@ async function runMainThread(): Promise<void> {
   await mkdir(join(imagesDir, "routed"), { recursive: true })
 
   const startedAt = Date.now()
+  let completedSamples = 0
+  const onProgress = () => {
+    completedSamples += 1
+    const rate = samplesPerMinute(completedSamples, startedAt).toFixed(0)
+    process.stdout.write(
+      `\r${completedSamples}/${sampleCount} samples (${rate} samples/minute)`,
+    )
+  }
+
   const workerRanges = buildWorkerRanges(sampleCount, effectiveConcurrency)
   const workerRuns = workerRanges.map((range) =>
-    runWorker({ range, outputDir }),
+    runWorker({ range, outputDir }, onProgress),
   )
   const workerResults = await Promise.all(workerRuns)
+  process.stdout.write("\n")
 
   const rows = workerResults.flatMap((result) => result.rows)
   const failures = workerResults.flatMap((result) => result.failures)
@@ -197,23 +218,33 @@ async function runWorkerThread(): Promise<void> {
         reason: lastReason,
       })
     }
+
+    parentPort?.postMessage({ type: "progress" } satisfies WorkerMessage)
   }
 
   parentPort?.postMessage({
+    type: "done",
     rows,
     failures,
     attempts,
-  } satisfies WorkerResult)
+  } satisfies WorkerMessage)
 }
 
-function runWorker(payload: WorkerPayload): Promise<WorkerResult> {
+function runWorker(
+  payload: WorkerPayload,
+  onProgress: () => void,
+): Promise<WorkerResult> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL(import.meta.url), { workerData: payload })
 
     let settled = false
-    worker.on("message", (result: WorkerResult) => {
+    worker.on("message", (msg: WorkerMessage) => {
+      if (msg.type === "progress") {
+        onProgress()
+        return
+      }
       settled = true
-      resolve(result)
+      resolve(msg)
     })
     worker.on("error", reject)
     worker.on("exit", (code) => {
