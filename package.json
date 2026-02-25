@@ -1,0 +1,17 @@
+{
+  "name": "dataset-zero-obstacle-10mm-square-z01",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.4",
+    "@tscircuit/high-density-a01": "^0.0.4",
+    "@types/bun": "latest",
+    "react-cosmos": "^7.1.1",
+    "react-cosmos-plugin-vite": "^7.1.1",
+    "vite": "^7.3.1"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
