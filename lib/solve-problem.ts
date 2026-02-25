@@ -17,10 +17,10 @@ import type {
 } from "./generate-problem.ts"
 import {
   CELL_SIZE_MM,
-  VIA_DIAMETER_MM,
-  TRACE_THICKNESS_MM,
-  TRACE_MARGIN_MM,
   IMAGE_SIZE_PX,
+  TRACE_MARGIN_MM,
+  TRACE_THICKNESS_MM,
+  VIA_DIAMETER_MM,
 } from "./generator-params.ts"
 
 const GRAPHICS_PADDING_PX = 40
@@ -393,11 +393,15 @@ function rewriteSvgViewport(
   const { x, y, width, height, outputWidth, outputHeight } = params
   const viewBox = `${x} ${y} ${width} ${height}`
 
-  return svg
-  // return svg
-  //   .replace(/viewBox="[^"]*"/, `viewBox="${viewBox}"`)
-  //   .replace(/width="[^"]*"/, `width="${outputWidth}"`)
-  //   .replace(/height="[^"]*"/, `height="${outputHeight}"`)
+  const withViewport = svg
+    .replace(/viewBox="[^"]*"/, `viewBox="${viewBox}"`)
+    .replace(/width="[^"]*"/, `width="${outputWidth}"`)
+    .replace(/height="[^"]*"/, `height="${outputHeight}"`)
+
+  return withViewport.replace(
+    /<rect\s+width="100%"\s+height="100%"\s+fill="white"\s*\/>/,
+    `<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="white"/>`,
+  )
 }
 
 function createProjectionMatrix(params: {

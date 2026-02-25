@@ -12,6 +12,10 @@ type Env = {
   SAMPLE_CACHE: KVNamespace
 }
 
+type ExecutionContext = {
+  waitUntil: (promise: Promise<unknown>) => void
+}
+
 type GenerateRequest = {
   problemId: string
   seed: number
@@ -38,8 +42,25 @@ type CachedResponse = {
   usedSeed?: number
 }
 
+type CachedKvRecord = {
+  ok: boolean
+  sample?: {
+    boundary_connection_pairs: unknown[]
+    routed_paths: unknown[]
+    connection_pair_svg?: string
+    routed_svg?: string
+  }
+  reason?: string
+  attempts: number
+  usedSeed?: number
+}
+
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(
+    request: Request,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<Response> {
     const url = new URL(request.url)
 
     if (request.method === "GET" && url.pathname === "/health") {
@@ -87,8 +108,12 @@ export default {
     const cached = await env.SAMPLE_CACHE.get(cacheKey, "json")
 
     if (cached) {
-      const cachedResponse = cached as CachedResponse
-      return json({ ...cachedResponse, cached: true })
+      const cachedResponse = cached as CachedKvRecord
+      const hydrated = await hydrateCachedResponse(
+        cachedResponse,
+        normalizedInput,
+      )
+      return json({ ...hydrated, cached: true })
     }
 
     const result = await generateSample(normalizedInput)
@@ -112,10 +137,94 @@ export default {
           attempts: result.attempts,
         }
 
-    await env.SAMPLE_CACHE.put(cacheKey, JSON.stringify(responseBody))
+    const cacheValue = stripSvgForCache(responseBody)
+    ctx.waitUntil(env.SAMPLE_CACHE.put(cacheKey, JSON.stringify(cacheValue)))
 
     return json(responseBody)
   },
+}
+
+async function hydrateCachedResponse(
+  cached: CachedKvRecord,
+  normalizedInput: GenerateSampleInput,
+): Promise<CachedResponse> {
+  if (!cached.ok || !cached.sample) {
+    return {
+      ok: false,
+      cached: true,
+      reason: cached.reason ?? "Cached sample missing payload",
+      attempts: cached.attempts,
+      usedSeed: cached.usedSeed,
+    }
+  }
+
+  if (cached.sample.connection_pair_svg && cached.sample.routed_svg) {
+    return {
+      ...cached,
+      cached: true,
+      sample: {
+        boundary_connection_pairs: cached.sample.boundary_connection_pairs,
+        routed_paths: cached.sample.routed_paths,
+        connection_pair_svg: cached.sample.connection_pair_svg,
+        routed_svg: cached.sample.routed_svg,
+      },
+    }
+  }
+
+  const regenSeed =
+    cached.usedSeed !== undefined && Number.isFinite(cached.usedSeed)
+      ? Math.floor(cached.usedSeed)
+      : normalizedInput.seed
+
+  const regenerated = await generateSample({
+    ...normalizedInput,
+    seed: regenSeed,
+    maxSolveAttempts: 1,
+  })
+
+  if (regenerated.ok) {
+    return {
+      ok: true,
+      cached: true,
+      sample: {
+        boundary_connection_pairs: regenerated.sample.boundary_connection_pairs,
+        routed_paths: regenerated.sample.routed_paths,
+        connection_pair_svg: regenerated.sample.connection_pair_svg,
+        routed_svg: regenerated.sample.routed_svg,
+      },
+      attempts: cached.attempts,
+      usedSeed: cached.usedSeed,
+    }
+  }
+
+  return {
+    ok: false,
+    cached: true,
+    reason: "Cached sample could not be re-rendered",
+    attempts: cached.attempts,
+    usedSeed: cached.usedSeed,
+  }
+}
+
+function stripSvgForCache(response: CachedResponse): CachedKvRecord {
+  if (!response.ok || !response.sample) {
+    return {
+      ok: response.ok,
+      reason: response.reason,
+      attempts: response.attempts,
+      usedSeed: response.usedSeed,
+    }
+  }
+
+  return {
+    ok: true,
+    sample: {
+      boundary_connection_pairs: response.sample.boundary_connection_pairs,
+      routed_paths: response.sample.routed_paths,
+    },
+    attempts: response.attempts,
+    usedSeed: response.usedSeed,
+  }
 }
 
 function json(body: unknown, status = 200): Response {
