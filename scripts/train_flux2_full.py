@@ -146,20 +146,22 @@ class TrainConfig(SharedConfig):
     seed: int = 42
 
 
+HF_TRAINING_DATASET = "makeshifted/zero-obstacle-high-density-z01-training"
+
+
 def prepare_training_data(hf_dataset: str) -> str:
-    """Download the Lance dataset from HuggingFace and convert to a local
-    HuggingFace datasets format with paired images that the Klein img2img
-    training script can consume.
+    """Download the Lance dataset from HuggingFace, convert to a proper
+    HuggingFace datasets repo with paired images, and push it so the
+    DreamBooth training script can load it via datasets.load_dataset().
 
     The img2img script expects columns:
         - cond_image: the input/condition image (connection-pairs)
         - output_image: the target image (routed)
         - instruction: the edit instruction text
 
-    Returns the path to the local training data directory.
+    Returns the HuggingFace dataset repo ID.
     """
     import io
-    import os
 
     import lance as lance_lib
     from datasets import Dataset, Image
@@ -199,12 +201,11 @@ def prepare_training_data(hf_dataset: str) -> str:
     hf_ds = hf_ds.cast_column("cond_image", Image())
     hf_ds = hf_ds.cast_column("output_image", Image())
 
-    local_dir = "/tmp/pcbrouter_train"
-    os.makedirs(local_dir, exist_ok=True)
-    hf_ds.save_to_disk(local_dir)
+    print(f"Pushing {len(rows)} paired samples to {HF_TRAINING_DATASET} ...")
+    hf_ds.push_to_hub(HF_TRAINING_DATASET, split="train")
+    print(f"Dataset available at: https://huggingface.co/datasets/{HF_TRAINING_DATASET}")
 
-    print(f"Prepared {len(rows)} paired samples in {local_dir}")
-    return local_dir
+    return HF_TRAINING_DATASET
 
 
 @app.function(
@@ -230,8 +231,8 @@ def train(config):
 
     write_basic_config(mixed_precision="bf16")
 
-    # Convert Lance dataset to local HuggingFace datasets format with paired images
-    local_data_dir = prepare_training_data(config.hf_dataset)
+    # Convert Lance dataset to HuggingFace datasets format and push to Hub
+    dataset_repo = prepare_training_data(config.hf_dataset)
 
     def _exec_subprocess(cmd: list[str]):
         """Executes subprocess and prints log to terminal while subprocess is running."""
@@ -257,7 +258,7 @@ def train(config):
             "examples/dreambooth/train_dreambooth_flux2_klein_img2img_full.py",
             "--mixed_precision=bf16",
             f"--pretrained_model_name_or_path={MODEL_DIR}",
-            f"--dataset_name={local_data_dir}",
+            f"--dataset_name={dataset_repo}",
             f"--output_dir={OUTPUT_DIR}",
             "--image_column=output_image",
             "--cond_image_column=cond_image",
