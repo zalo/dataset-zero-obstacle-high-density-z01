@@ -1,0 +1,50 @@
+[
+  {
+    "problemId": "sample-000034",
+    "reason": "HighDensitySolverA01 ran out of iterations"
+  },
+  {
+    "problemId": "sample-000034",
+    "reason": "HighDensitySolverA01 ran out of iterations"
+  },
+  {
+    "problemId": "sample-000034",
+    "reason": "HighDensitySolverA01 ran out of iterations"
+  },
+  {
+    "problemId": "sample-000036",
+    "reason": "HighDensitySolverA01 ran out of iterations"
+  },
+  {
+    "problemId": "sample-000047",
+    "reason": "HighDensitySolverA01 ran out of iterations"
+  },
+  {
+    "problemId": "sample-000058",
+    "reason": "HighDensitySolverA01 ran out of iterations"
+  },
+  {
+    "problemId": "sample-000074",
+    "reason": "HighDensitySolverA01 ran out of iterations"
+  },
+  {
+    "problemId": "sample-000084",
+    "reason": "HighDensitySolverA01 ran out of iterations"
+  },
+  {
+    "problemId": "sample-000087",
+    "reason": "HighDensitySolverA01 ran out of iterations"
+  },
+  {
+    "problemId": "sample-000088",
+    "reason": "HighDensitySolverA01 ran out of iterations"
+  },
+  {
+    "problemId": "sample-000093",
+    "reason": "HighDensitySolverA01 ran out of iterations"
+  },
+  {
+    "problemId": "sample-000093",
+    "reason": "HighDensitySolverA01 ran out of iterations"
+  }
+]

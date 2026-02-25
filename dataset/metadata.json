@@ -1,0 +1,13 @@
+{
+  "created_at": "2026-02-25T20:48:25.174Z",
+  "requested_samples": 100,
+  "generated_samples": 100,
+  "attempts": 112,
+  "skipped": 12,
+  "columns": [
+    "boundary_connection_pairs",
+    "connection_pair_image",
+    "routed_image",
+    "routed_paths"
+  ]
+}
