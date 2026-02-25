@@ -3,6 +3,12 @@
   "module": "index.ts",
   "type": "module",
   "private": true,
+  "scripts": {
+    "generate:dataset": "bun scripts/generate-dataset.ts"
+  },
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2"
+  },
   "devDependencies": {
     "@biomejs/biome": "^2.4.4",
     "@tscircuit/high-density-a01": "^0.0.4",
