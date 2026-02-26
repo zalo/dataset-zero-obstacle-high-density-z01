@@ -179,9 +179,9 @@ class Inference:
             transformer_path = os.path.join(checkpoint_path, "transformer")
             if os.path.isdir(transformer_path):
                 print(f"Loading fine-tuned transformer from: {transformer_path}")
-                from diffusers import Flux2KleinTransformer2DModel
+                from diffusers import Flux2Transformer2DModel
 
-                self.pipe.transformer = Flux2KleinTransformer2DModel.from_pretrained(
+                self.pipe.transformer = Flux2Transformer2DModel.from_pretrained(
                     transformer_path,
                     torch_dtype=torch.bfloat16,
                 )
@@ -189,11 +189,11 @@ class Inference:
                 print(f"Warning: no transformer dir in {checkpoint_path}, using base model")
         else:
             print(f"Loading final model from: {FULL_OUTPUT_DIR}")
-            from diffusers import Flux2KleinTransformer2DModel
+            from diffusers import Flux2Transformer2DModel
 
             transformer_path = os.path.join(FULL_OUTPUT_DIR, "transformer")
             if os.path.isdir(transformer_path):
-                self.pipe.transformer = Flux2KleinTransformer2DModel.from_pretrained(
+                self.pipe.transformer = Flux2Transformer2DModel.from_pretrained(
                     transformer_path,
                     torch_dtype=torch.bfloat16,
                 )
