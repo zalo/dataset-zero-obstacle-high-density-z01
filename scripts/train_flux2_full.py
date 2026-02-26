@@ -162,7 +162,7 @@ class TrainConfig(SharedConfig):
         else []
     ),
 )
-def train(config):
+def train(config, segment_end: int, resume: bool):
     import subprocess
 
     from accelerate.utils import write_basic_config
@@ -185,43 +185,69 @@ def train(config):
         if exitcode != 0:
             raise subprocess.CalledProcessError(exitcode, "\n".join(cmd))
 
-    print("launching FLUX.2 Klein img2img FULL fine-tuning for PCB routing")
-    _exec_subprocess(
-        [
-            "accelerate",
-            "launch",
-            "examples/dreambooth/train_dreambooth_flux2_klein_img2img_full.py",
-            "--mixed_precision=bf16",
-            f"--pretrained_model_name_or_path={MODEL_DIR}",
-            f"--dataset_name={config.hf_training_dataset}",
-            f"--output_dir={OUTPUT_DIR}",
-            "--image_column=output_image",
-            "--cond_image_column=cond_image",
-            "--caption_column=instruction",
-            "--instance_prompt=Route the traces between the color matched pins",
-            f"--resolution={config.resolution}",
-            f"--train_batch_size={config.train_batch_size}",
-            f"--gradient_accumulation_steps={config.gradient_accumulation_steps}",
-            "--gradient_checkpointing",
-            f"--learning_rate={config.learning_rate}",
-            f"--lr_scheduler={config.lr_scheduler}",
-            f"--lr_warmup_steps={config.lr_warmup_steps}",
-            f"--max_train_steps={config.max_train_steps}",
-            f"--checkpointing_steps={config.checkpointing_steps}",
-            f"--seed={config.seed}",
-        ]
-        + (["--report_to=wandb"] if USE_WANDB else []),
-    )
+    print(f"launching FLUX.2 Klein img2img FULL fine-tuning (steps up to {segment_end})")
+    cmd = [
+        "accelerate",
+        "launch",
+        "examples/dreambooth/train_dreambooth_flux2_klein_img2img_full.py",
+        "--mixed_precision=bf16",
+        f"--pretrained_model_name_or_path={MODEL_DIR}",
+        f"--dataset_name={config.hf_training_dataset}",
+        f"--output_dir={OUTPUT_DIR}",
+        "--image_column=output_image",
+        "--cond_image_column=cond_image",
+        "--caption_column=instruction",
+        "--instance_prompt=Route the traces between the color matched pins",
+        f"--resolution={config.resolution}",
+        f"--train_batch_size={config.train_batch_size}",
+        f"--gradient_accumulation_steps={config.gradient_accumulation_steps}",
+        "--gradient_checkpointing",
+        f"--learning_rate={config.learning_rate}",
+        f"--lr_scheduler={config.lr_scheduler}",
+        f"--lr_warmup_steps={config.lr_warmup_steps}",
+        f"--max_train_steps={segment_end}",
+        f"--checkpointing_steps={config.checkpointing_steps}",
+        f"--seed={config.seed}",
+    ]
+    if resume:
+        cmd.append("--resume_from_checkpoint=latest")
+    if USE_WANDB:
+        cmd.append("--report_to=wandb")
+
+    _exec_subprocess(cmd)
     volume.commit()
 
 
 @app.local_entrypoint()
 def run(
-    max_train_steps: int = 5400,
+    max_train_steps: int = 13650,
 ):
-    print("downloading FLUX.2 Klein base model")
-    download_models.remote(SharedConfig())  # .remote() blocks until complete
-    print("starting img2img FULL fine-tuning (A100-80GB)")
+    import subprocess
+
     config = TrainConfig(max_train_steps=max_train_steps)
-    train.remote(config)
-    print("training finished")
+
+    print("downloading FLUX.2 Klein base model")
+    download_models.remote(SharedConfig())
+
+    # Train in segments of checkpointing_steps, deploying the inference
+    # API after each checkpoint so the model can be tested during training.
+    step = 0
+    while step < max_train_steps:
+        segment_end = min(step + config.checkpointing_steps, max_train_steps)
+        resume = step > 0
+
+        print(f"\n{'='*60}")
+        print(f"Training segment: steps {step} -> {segment_end}")
+        print(f"{'='*60}")
+        train.remote(config, segment_end=segment_end, resume=resume)
+
+        print(f"\nCheckpoint at step {segment_end} committed. Deploying inference API...")
+        subprocess.run(
+            ["modal", "deploy", "scripts/deploy_api.py"],
+            check=True,
+        )
+        print(f"Inference API deployed with checkpoint at step {segment_end}.")
+
+        step = segment_end
+
+    print("\nTraining finished. Final model deployed.")

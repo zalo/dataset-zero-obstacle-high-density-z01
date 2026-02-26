@@ -140,8 +140,17 @@ def _sse_generate(pipe, prompt, input_image, strength, seed):
 class Inference:
     @modal.enter()
     def initialize(self):
+        import glob
+        import os
+
+        # Load from the latest checkpoint, or the final output if training is complete.
+        # Checkpoints are saved as OUTPUT_DIR/checkpoint-{step}/
+        checkpoints = sorted(glob.glob(os.path.join(FULL_OUTPUT_DIR, "checkpoint-*")))
+        model_path = checkpoints[-1] if checkpoints else FULL_OUTPUT_DIR
+        print(f"Loading model from: {model_path}")
+
         self.pipe = diffusers.Flux2KleinPipeline.from_pretrained(
-            FULL_OUTPUT_DIR,
+            model_path,
             torch_dtype=torch.bfloat16,
         )
         self.pipe.to("cuda")
