@@ -4,7 +4,9 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "generate:dataset": "bun scripts/generate-dataset.ts"
+    "generate:dataset": "bun scripts/generate-dataset.ts",
+    "generate:against-server": "bun scripts/generate-against-server.ts",
+    "cloudflare:deploy": "npm exec --yes --package wrangler@4.43.0 -- wrangler deploy --config cloudflare-endpoint/wrangler.toml"
   },
   "dependencies": {
     "@resvg/resvg-js": "^2.6.2"
