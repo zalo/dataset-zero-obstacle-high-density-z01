@@ -313,7 +313,7 @@ class Inference:
 
 <script>
 const SAMPLES = {samples_json};
-const ROUTE_URL = window.location.href.replace(/\\/test$/, '/route');
+const ROUTE_URL = window.location.origin.replace('-test', '-route');
 
 document.getElementById('strength').addEventListener('input', e => {{
   document.getElementById('strength-val').textContent = e.target.value;
