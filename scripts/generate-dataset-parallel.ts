@@ -43,7 +43,7 @@ type WorkerResult = {
 }
 
 type WorkerMessage =
-  | { type: "progress" }
+  | { type: "progress"; skipped: boolean }
   | ({ type: "done" } & WorkerResult)
 
 type DatasetRowWithId = DatasetRow & { id: string }
@@ -60,6 +60,7 @@ async function runMainThread(): Promise<void> {
       "sample-count": { type: "string" },
       "output-dir": { type: "string" },
       concurrency: { type: "string" },
+      offset: { type: "string" },
     },
     strict: true,
   })
@@ -77,6 +78,7 @@ async function runMainThread(): Promise<void> {
   const sampleCount = parsePositiveInt(args["sample-count"])
   const outputDir = args["output-dir"]
   const concurrency = parsePositiveInt(args.concurrency)
+  const offset = args.offset ? parseNonNegativeInt(args.offset) : 0
   const effectiveConcurrency = Math.min(sampleCount, concurrency)
 
   const imagesDir = join(outputDir, "images")
@@ -87,15 +89,18 @@ async function runMainThread(): Promise<void> {
 
   const startedAt = Date.now()
   let completedSamples = 0
-  const onProgress = () => {
+  let skippedSamples = 0
+  const onProgress = (skipped: boolean) => {
     completedSamples += 1
-    const rate = samplesPerMinute(completedSamples, startedAt).toFixed(0)
+    if (skipped) skippedSamples += 1
+    const generated = completedSamples - skippedSamples
+    const rate = samplesPerMinute(generated, startedAt).toFixed(0)
     process.stdout.write(
       `\r${completedSamples}/${sampleCount} samples (${rate} samples/minute)`,
     )
   }
 
-  const workerRanges = buildWorkerRanges(sampleCount, effectiveConcurrency)
+  const workerRanges = buildWorkerRanges(sampleCount, effectiveConcurrency, offset)
   const workerRuns = workerRanges.map((range) =>
     runWorker({ range, outputDir }, onProgress),
   )
@@ -132,7 +137,7 @@ async function runMainThread(): Promise<void> {
     concurrency,
     workers_used: effectiveConcurrency,
     elapsed_ms: Date.now() - startedAt,
-    samples_per_minute: samplesPerMinute(rows.length, startedAt),
+    samples_per_minute: samplesPerMinute(newRows.length, startedAt),
     columns: [
       "boundary_connection_pairs",
       "connection_pair_image",
@@ -161,7 +166,7 @@ async function runMainThread(): Promise<void> {
 
   console.log(`dataset written to ${jsonlPath}`)
   console.log(
-    `samples/minute: ${samplesPerMinute(rows.length, startedAt).toFixed(2)}`,
+    `samples/minute: ${samplesPerMinute(newRows.length, startedAt).toFixed(2)}`,
   )
 }
 
@@ -182,7 +187,7 @@ async function runWorkerThread(): Promise<void> {
     const routedPngPath = join(payload.outputDir, "images", "routed", `${sampleId}.png`)
     if (existsSync(routedPngPath)) {
       skippedIds.push(sampleId)
-      parentPort?.postMessage({ type: "progress" } satisfies WorkerMessage)
+      parentPort?.postMessage({ type: "progress", skipped: true } satisfies WorkerMessage)
       continue
     }
 
@@ -237,7 +242,7 @@ async function runWorkerThread(): Promise<void> {
       })
     }
 
-    parentPort?.postMessage({ type: "progress" } satisfies WorkerMessage)
+    parentPort?.postMessage({ type: "progress", skipped: false } satisfies WorkerMessage)
   }
 
   parentPort?.postMessage({
@@ -251,7 +256,7 @@ async function runWorkerThread(): Promise<void> {
 
 function runWorker(
   payload: WorkerPayload,
-  onProgress: () => void,
+  onProgress: (skipped: boolean) => void,
 ): Promise<WorkerResult> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL(import.meta.url), { workerData: payload })
@@ -259,7 +264,7 @@ function runWorker(
     let settled = false
     worker.on("message", (msg: WorkerMessage) => {
       if (msg.type === "progress") {
-        onProgress()
+        onProgress(msg.skipped)
         return
       }
       settled = true
@@ -277,13 +282,14 @@ function runWorker(
 function buildWorkerRanges(
   sampleCount: number,
   concurrency: number,
+  offset: number,
 ): WorkerRange[] {
   const workerCount = Math.max(1, Math.min(sampleCount, concurrency))
   const baseSize = Math.floor(sampleCount / workerCount)
   const remainder = sampleCount % workerCount
 
   const ranges: WorkerRange[] = []
-  let cursor = 1
+  let cursor = offset + 1
   for (let i = 0; i < workerCount; i += 1) {
     const size = baseSize + (i < remainder ? 1 : 0)
     const startIndex = cursor
@@ -299,6 +305,15 @@ function parsePositiveInt(raw: string): number {
   const value = Number(raw)
   if (!Number.isFinite(value) || value <= 0) {
     throw new Error(`Expected positive integer, got: ${raw}`)
+  }
+
+  return Math.floor(value)
+}
+
+function parseNonNegativeInt(raw: string): number {
+  const value = Number(raw)
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`Expected non-negative integer, got: ${raw}`)
   }
 
   return Math.floor(value)

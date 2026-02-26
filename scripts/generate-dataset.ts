@@ -22,6 +22,7 @@ const { values: args } = parseArgs({
   options: {
     "sample-count": { type: "string" },
     "output-dir": { type: "string" },
+    offset: { type: "string" },
   },
   strict: true,
 })
@@ -35,6 +36,7 @@ if (!args["output-dir"]) {
 
 const sampleCount = parsePositiveInt(args["sample-count"])
 const outputDir = args["output-dir"]
+const offset = args.offset ? parseNonNegativeInt(args.offset) : 0
 const failures: Array<{ problemId: string; reason: string }> = []
 const pairCountBySampleIndex = new Map<number, number>()
 
@@ -53,7 +55,7 @@ const maxAttempts = sampleCount * 200
 while (solvedCount < sampleCount && attempts < maxAttempts) {
   attempts += 1
 
-  const sampleIndex = solvedCount + 1
+  const sampleIndex = offset + solvedCount + 1
   const pairCount = getOrCreatePairCount(sampleIndex)
   const problemId = `sample-${sampleIndex.toString().padStart(6, "0")}`
 
@@ -162,6 +164,15 @@ function parsePositiveInt(raw: string): number {
   const value = Number(raw)
   if (!Number.isFinite(value) || value <= 0) {
     throw new Error(`Expected positive integer, got: ${raw}`)
+  }
+
+  return Math.floor(value)
+}
+
+function parseNonNegativeInt(raw: string): number {
+  const value = Number(raw)
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`Expected non-negative integer, got: ${raw}`)
   }
 
   return Math.floor(value)
