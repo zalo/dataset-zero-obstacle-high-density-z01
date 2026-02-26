@@ -221,6 +221,7 @@ def train(config, segment_end: int, resume: bool):
 @app.local_entrypoint()
 def run(
     max_train_steps: int = 13650,
+    start_step: int = 0,
 ):
     import subprocess
 
@@ -231,7 +232,7 @@ def run(
 
     # Train in segments of checkpointing_steps, deploying the inference
     # API after each checkpoint so the model can be tested during training.
-    step = 0
+    step = start_step
     while step < max_train_steps:
         segment_end = min(step + config.checkpointing_steps, max_train_steps)
         resume = step > 0
