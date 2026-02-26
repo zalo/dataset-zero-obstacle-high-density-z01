@@ -76,23 +76,20 @@ TEST_SAMPLE_INDICES = [0, 500, 1000, 2000, 3000, 4000]
 HF_DATASET = "tscircuit/zero-obstacle-high-density-z01"
 
 
-def _sse_generate(pipe, prompt, input_image, strength, seed):
+def _sse_generate(pipe, prompt, input_image, seed):
     """Run img2img pipeline in a thread, yield SSE events with progress."""
     seed = seed if seed is not None else random.randint(0, 2**32 - 1)
     generator = torch.Generator("cuda").manual_seed(seed)
 
     q = queue.Queue()
 
-    # Effective steps for img2img = NUM_STEPS * strength
-    effective_steps = max(1, int(NUM_STEPS * strength))
-
     def callback_on_step_end(pipe_self, step, timestep, callback_kwargs):
-        progress = (step + 1) / effective_steps
+        progress = (step + 1) / NUM_STEPS
         q.put(
             {
                 "stage": "generating",
                 "step": step + 1,
-                "total": effective_steps,
+                "total": NUM_STEPS,
                 "progress": round(progress, 3),
             }
         )
@@ -103,7 +100,6 @@ def _sse_generate(pipe, prompt, input_image, strength, seed):
             images = pipe(
                 prompt=prompt,
                 image=input_image,
-                strength=strength,
                 num_inference_steps=NUM_STEPS,
                 guidance_scale=4.0,
                 height=256,
@@ -228,7 +224,6 @@ class Inference:
         POST body (JSON):
             input_image: base64-encoded PNG of the connection-pairs image
             instruction: (optional) edit instruction text
-            strength:    (optional) img2img strength, 0.0-1.0 (default 0.75)
             seed:        (optional) RNG seed for reproducibility
         """
         body = await request.json()
@@ -241,7 +236,6 @@ class Inference:
 
         input_b64 = body["input_image"]
         instruction = body.get("instruction", DEFAULT_INSTRUCTION)
-        strength = min(max(float(body.get("strength", 0.75)), 0.0), 1.0)
         seed = body.get("seed")
 
         input_bytes = base64.b64decode(input_b64)
@@ -250,12 +244,11 @@ class Inference:
 
         print(
             f"Inference: instruction={instruction!r}, "
-            f"strength={strength}, seed={seed}, "
-            f"image_size={input_image.size}"
+            f"seed={seed}, image_size={input_image.size}"
         )
 
         return StreamingResponse(
-            _sse_generate(self.pipe, instruction, input_image, strength, seed),
+            _sse_generate(self.pipe, instruction, input_image, seed),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -303,8 +296,6 @@ class Inference:
 <p class="subtitle">Checkpoint: <strong id="checkpoint">{self.checkpoint_name}</strong></p>
 
 <div class="controls">
-  <label>Strength: <input type="range" id="strength" min="0" max="1" step="0.05" value="0.75">
-    <span id="strength-val">0.75</span></label>
   <label>Seed: <input type="number" id="seed" value="42" style="width:70px"></label>
   <button id="run-btn" onclick="runAll()">Generate All</button>
 </div>
@@ -314,10 +305,6 @@ class Inference:
 <script>
 const SAMPLES = {samples_json};
 const ROUTE_URL = window.location.origin.replace('-test', '-route');
-
-document.getElementById('strength').addEventListener('input', e => {{
-  document.getElementById('strength-val').textContent = e.target.value;
-}});
 
 function init() {{
   const grid = document.getElementById('grid');
@@ -347,7 +334,6 @@ function init() {{
 
 async function generate(idx) {{
   const s = SAMPLES[idx];
-  const strength = parseFloat(document.getElementById('strength').value);
   const seed = parseInt(document.getElementById('seed').value);
   const outImg = document.getElementById('output-' + idx);
   const outLabel = document.getElementById('output-label-' + idx);
@@ -363,7 +349,7 @@ async function generate(idx) {{
     const resp = await fetch(ROUTE_URL, {{
       method: 'POST',
       headers: {{ 'Content-Type': 'application/json', 'Accept': 'text/event-stream' }},
-      body: JSON.stringify({{ input_image: s.cond_b64, strength, seed }}),
+      body: JSON.stringify({{ input_image: s.cond_b64, seed }}),
     }});
 
     const reader = resp.body.getReader();
