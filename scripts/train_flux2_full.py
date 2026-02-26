@@ -131,18 +131,18 @@ class TrainConfig(SharedConfig):
     """
 
     # HuggingFace dataset with paired images (cond_image, output_image,
-    # instruction columns), pushed by convert_and_upload.py.
-    hf_training_dataset: str = "makeshifted/zero-obstacle-high-density-z01-training"
+    # instruction columns).
+    hf_training_dataset: str = "tscircuit/zero-obstacle-high-density-z01"
 
     resolution: int = 256
-    train_batch_size: int = 1  # img2img pairs need more memory per sample
-    gradient_accumulation_steps: int = 4  # effective batch size = 4
-    learning_rate: float = 1e-6  # very low LR for full FT (prevents washed outputs)
-    lr_scheduler: str = "constant_with_warmup"
+    train_batch_size: int = 2
+    gradient_accumulation_steps: int = 2  # effective batch size = 4
+    learning_rate: float = 1e-5  # same range as morphmaker full FT
+    lr_scheduler: str = "cosine"
     lr_warmup_steps: int = 100
-    # 71 train images / effective_batch 4 = ~18 steps/epoch, * 300 epochs ≈ 5400
-    max_train_steps: int = 5400
-    checkpointing_steps: int = 500
+    # 18195 train images / effective_batch 4 = ~4549 steps/epoch, * 3 epochs ≈ 13647
+    max_train_steps: int = 13650
+    checkpointing_steps: int = 4549  # checkpoint once per epoch
     seed: int = 42
 
 
