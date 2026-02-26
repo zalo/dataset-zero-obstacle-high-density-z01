@@ -131,7 +131,7 @@ class TrainConfig(SharedConfig):
     """
 
     # Small 71-sample dataset for fast iteration
-    hf_training_dataset: str = "makeshifted/zero-obstacle-high-density-z01-training"
+    hf_training_dataset: str = "tscircuit/zero-obstacle-high-density-z01"
 
     resolution: int = 256
     train_batch_size: int = 1

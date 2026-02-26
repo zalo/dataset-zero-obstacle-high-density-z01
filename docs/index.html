@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PCB Trace Router - Model Test</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: #0a0a0a; color: #e0e0e0; padding: 20px; max-width: 900px; margin: 0 auto; }
+  h1 { text-align: center; margin-bottom: 8px; font-size: 1.4em; color: #fff; }
+  .subtitle { text-align: center; margin-bottom: 20px; color: #888; font-size: 0.85em; }
+
+  .config { background: #141414; border: 1px solid #222; border-radius: 8px; padding: 16px; margin-bottom: 20px; }
+  .config h2 { font-size: 0.9em; color: #aaa; margin-bottom: 12px; }
+  .config-row { display: flex; gap: 12px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+  .config-row label { font-size: 0.8em; color: #888; min-width: 60px; }
+  .config-row input, .config-row select { background: #1a1a1a; border: 1px solid #333; color: #fff; padding: 6px 10px; border-radius: 4px; font-size: 0.8em; flex: 1; min-width: 0; }
+  .config-row input.endpoint { font-family: monospace; font-size: 0.75em; }
+
+  .sample-picker { background: #141414; border: 1px solid #222; border-radius: 8px; padding: 16px; margin-bottom: 20px; }
+  .sample-picker h2 { font-size: 0.9em; color: #aaa; margin-bottom: 12px; }
+  .sample-picker select { background: #1a1a1a; border: 1px solid #333; color: #fff; padding: 6px 10px; border-radius: 4px; font-size: 0.8em; width: 100%; }
+
+  .generate-row { text-align: center; margin-bottom: 20px; }
+  button { background: #2563eb; color: #fff; border: none; padding: 10px 28px; border-radius: 6px; cursor: pointer; font-size: 0.9em; font-weight: 600; }
+  button:hover { background: #1d4ed8; }
+  button:disabled { background: #333; cursor: not-allowed; }
+
+  .result { background: #141414; border: 1px solid #222; border-radius: 8px; padding: 16px; }
+  .images { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+  .img-col { text-align: center; }
+  .img-col img { width: 256px; height: 256px; border-radius: 4px; background: #000; image-rendering: pixelated; }
+  .img-col .label { font-size: 0.75em; color: #666; margin-top: 4px; }
+  .progress { height: 4px; background: #222; border-radius: 2px; margin-top: 12px; overflow: hidden; }
+  .progress-fill { height: 100%; background: #2563eb; width: 0%; transition: width 0.3s; }
+  .status { font-size: 0.8em; color: #888; margin-top: 8px; text-align: center; min-height: 1.2em; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+
+<h1>PCB Trace Router</h1>
+<p class="subtitle">Test fine-tuned FLUX.2 Klein 4B image-to-image routing models</p>
+
+<div class="config">
+  <h2>Endpoint</h2>
+  <div class="config-row">
+    <label>URL</label>
+    <input type="text" id="endpoint" class="endpoint"
+      value="https://zalo--pcbrouter-flux2-inference-serve.modal.run"
+      placeholder="https://your--modal-endpoint.modal.run" />
+  </div>
+  <div class="config-row">
+    <label>Seed</label>
+    <input type="number" id="seed" value="42" style="max-width:100px" />
+  </div>
+</div>
+
+<div class="sample-picker">
+  <h2>Test Sample</h2>
+  <select id="sample-select" disabled>
+    <option value="">Loading samples from HuggingFace...</option>
+  </select>
+</div>
+
+<div class="generate-row">
+  <button id="run-btn" onclick="generate()" disabled>Loading...</button>
+</div>
+
+<div class="result">
+  <div class="images">
+    <div class="img-col">
+      <img id="img-input" src="" alt="Select a sample" />
+      <div class="label">Input (connection pairs)</div>
+    </div>
+    <div class="img-col">
+      <img id="img-output" src="" alt="Click Generate" />
+      <div class="label" id="output-label">Model Output</div>
+    </div>
+    <div class="img-col">
+      <img id="img-gt" src="" alt="Select a sample" />
+      <div class="label">Ground Truth</div>
+    </div>
+  </div>
+  <div class="progress"><div class="progress-fill" id="prog"></div></div>
+  <div class="status" id="status">Select a test sample and click Generate</div>
+</div>
+
+<script>
+const HF_DATASET = "tscircuit/zero-obstacle-high-density-z01";
+const SAMPLE_INDICES = [0, 100, 500, 1000, 2000, 3000, 4000];
+let samples = [];
+let generating = false;
+
+// Load test samples via HuggingFace datasets server parquet API
+async function loadSamples() {
+  const statusEl = document.getElementById('status');
+  statusEl.textContent = 'Loading test samples from HuggingFace...';
+
+  try {
+    // Fetch parquet rows directly from the HF datasets server
+    const resp = await fetch(
+      `https://datasets-server.huggingface.co/rows?dataset=${encodeURIComponent(HF_DATASET)}&config=default&split=test&offset=0&length=100`
+    );
+    const data = await resp.json();
+    const rows = data.rows;
+
+    const select = document.getElementById('sample-select');
+    select.innerHTML = '';
+
+    for (const idx of SAMPLE_INDICES) {
+      if (idx < rows.length) {
+        const row = rows[idx].row;
+        samples.push({
+          idx: idx,
+          cond_src: row.cond_image.src,
+          gt_src: row.output_image.src,
+        });
+        const opt = document.createElement('option');
+        opt.value = samples.length - 1;
+        opt.textContent = `Test sample #${idx}`;
+        select.appendChild(opt);
+      }
+    }
+
+    select.disabled = false;
+    select.addEventListener('change', onSampleChange);
+    document.getElementById('run-btn').disabled = false;
+    document.getElementById('run-btn').textContent = 'Generate';
+
+    // Select first sample
+    if (samples.length > 0) {
+      select.value = '0';
+      onSampleChange();
+    }
+
+    statusEl.textContent = `Loaded ${samples.length} test samples. Select one and click Generate.`;
+  } catch (e) {
+    statusEl.textContent = 'Failed to load samples: ' + e.message;
+    // Fallback: let user upload their own image
+    document.getElementById('run-btn').disabled = false;
+    document.getElementById('run-btn').textContent = 'Generate';
+  }
+}
+
+function onSampleChange() {
+  const idx = parseInt(document.getElementById('sample-select').value);
+  if (isNaN(idx) || !samples[idx]) return;
+  const s = samples[idx];
+
+  document.getElementById('img-input').src = s.cond_src;
+  document.getElementById('img-gt').src = s.gt_src;
+
+  // Reset output
+  document.getElementById('img-output').src = s.gt_src;
+  document.getElementById('img-output').style.opacity = '0.3';
+  document.getElementById('output-label').textContent = 'Ground Truth (faded)';
+  document.getElementById('prog').style.width = '0%';
+  document.getElementById('status').textContent = 'Ready';
+}
+
+async function imgUrlToBase64(url) {
+  const resp = await fetch(url);
+  const blob = await resp.blob();
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result.split(',')[1]);
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function generate() {
+  if (generating) return;
+  generating = true;
+
+  const btn = document.getElementById('run-btn');
+  btn.disabled = true;
+  btn.textContent = 'Generating...';
+
+  const endpoint = document.getElementById('endpoint').value.replace(/\/+$/, '');
+  const seed = parseInt(document.getElementById('seed').value);
+  const sampleIdx = parseInt(document.getElementById('sample-select').value);
+  const outImg = document.getElementById('img-output');
+  const outLabel = document.getElementById('output-label');
+  const prog = document.getElementById('prog');
+  const status = document.getElementById('status');
+
+  outImg.style.opacity = '0.3';
+  outLabel.textContent = 'Generating...';
+  prog.style.width = '0%';
+  status.textContent = 'Connecting to endpoint...';
+
+  try {
+    // Convert the input image to base64
+    const inputB64 = await imgUrlToBase64(samples[sampleIdx].cond_src);
+
+    const resp = await fetch(endpoint + '/route', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+      body: JSON.stringify({ input_image: inputB64, seed }),
+    });
+
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const event = JSON.parse(line.slice(6));
+          if (event.stage === 'loading') {
+            status.textContent = event.message;
+          } else if (event.stage === 'generating') {
+            const pct = Math.round(event.progress * 100);
+            prog.style.width = pct + '%';
+            status.textContent = `Step ${event.step}/${event.total} (${pct}%)`;
+          } else if (event.stage === 'complete') {
+            outImg.src = 'data:image/png;base64,' + event.image;
+            outImg.style.opacity = '1';
+            outLabel.textContent = `Model Output (${event.checkpoint || 'unknown'})`;
+            prog.style.width = '100%';
+            status.textContent = 'Done';
+          } else if (event.stage === 'error') {
+            status.textContent = 'Error: ' + event.message;
+          }
+        } catch (e) {}
+      }
+    }
+  } catch (e) {
+    status.textContent = 'Error: ' + e.message;
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Generate';
+  generating = false;
+}
+
+// Save/restore endpoint from localStorage
+const savedEndpoint = localStorage.getItem('pcbrouter-endpoint');
+if (savedEndpoint) document.getElementById('endpoint').value = savedEndpoint;
+document.getElementById('endpoint').addEventListener('change', (e) => {
+  localStorage.setItem('pcbrouter-endpoint', e.target.value);
+});
+
+loadSamples();
+</script>
+</body>
+</html>

@@ -38,7 +38,7 @@ EDIT_INSTRUCTION = (
     "color from crossing."
 )
 
-HF_REPO_ID = "makeshifted/zero-obstacle-high-density-z01-training"
+HF_REPO_ID = "tscircuit/zero-obstacle-high-density-z01"
 TARGET_SIZE = (256, 256)
 TEST_RATIO = 0.2
 RANDOM_SEED = 42
