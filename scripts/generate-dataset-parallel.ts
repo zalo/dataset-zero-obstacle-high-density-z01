@@ -1,4 +1,5 @@
-import { mkdir, writeFile } from "node:fs/promises"
+import { existsSync } from "node:fs"
+import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { parseArgs } from "node:util"
 import {
@@ -37,6 +38,7 @@ type WorkerPayload = {
 type WorkerResult = {
   rows: DatasetRowWithId[]
   failures: Array<{ problemId: string; reason: string }>
+  skippedIds: string[]
   attempts: number
 }
 
@@ -81,6 +83,8 @@ async function runMainThread(): Promise<void> {
   await mkdir(join(imagesDir, "connection-pairs"), { recursive: true })
   await mkdir(join(imagesDir, "routed"), { recursive: true })
 
+  const existingRows = await loadExistingRows(join(outputDir, "dataset.jsonl"))
+
   const startedAt = Date.now()
   let completedSamples = 0
   const onProgress = () => {
@@ -98,7 +102,12 @@ async function runMainThread(): Promise<void> {
   const workerResults = await Promise.all(workerRuns)
   process.stdout.write("\n")
 
-  const rows = workerResults.flatMap((result) => result.rows)
+  const skippedIds = workerResults.flatMap((result) => result.skippedIds)
+  const skippedRows = skippedIds
+    .map((id) => existingRows.get(id))
+    .filter((row): row is DatasetRowWithId => row != null)
+  const newRows = workerResults.flatMap((result) => result.rows)
+  const rows = [...skippedRows, ...newRows]
   const failures = workerResults.flatMap((result) => result.failures)
   const attempts = workerResults.reduce(
     (sum, result) => sum + result.attempts,
@@ -160,6 +169,7 @@ async function runWorkerThread(): Promise<void> {
   const payload = workerData as WorkerPayload
   const rows: DatasetRowWithId[] = []
   const failures: Array<{ problemId: string; reason: string }> = []
+  const skippedIds: string[] = []
   let attempts = 0
 
   for (
@@ -168,6 +178,14 @@ async function runWorkerThread(): Promise<void> {
     index += 1
   ) {
     const sampleId = `sample-${index.toString().padStart(6, "0")}`
+
+    const routedPngPath = join(payload.outputDir, "images", "routed", `${sampleId}.png`)
+    if (existsSync(routedPngPath)) {
+      skippedIds.push(sampleId)
+      parentPort?.postMessage({ type: "progress" } satisfies WorkerMessage)
+      continue
+    }
+
     const pairCount = pairCountForIndex(index)
 
     let solved = false
@@ -226,6 +244,7 @@ async function runWorkerThread(): Promise<void> {
     type: "done",
     rows,
     failures,
+    skippedIds,
     attempts,
   } satisfies WorkerMessage)
 }
@@ -289,6 +308,23 @@ function pairCountForIndex(index: number): number {
   const hash = ((index * 1103515245 + 12345) >>> 16) & 0x7fff
   const range = MAX_CONNECTIONS - MIN_CONNECTIONS + 1
   return MIN_CONNECTIONS + (hash % range)
+}
+
+async function loadExistingRows(
+  path: string,
+): Promise<Map<string, DatasetRowWithId>> {
+  const map = new Map<string, DatasetRowWithId>()
+  if (!existsSync(path)) return map
+  const content = await readFile(path, "utf8")
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    try {
+      const row = JSON.parse(trimmed) as DatasetRowWithId
+      if (row.id) map.set(row.id, row)
+    } catch {}
+  }
+  return map
 }
 
 function samplesPerMinute(completedCount: number, startedAtMs: number): number {

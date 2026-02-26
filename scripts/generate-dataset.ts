@@ -1,4 +1,5 @@
-import { appendFile, mkdir, writeFile } from "node:fs/promises"
+import { existsSync } from "node:fs"
+import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { parseArgs } from "node:util"
 
@@ -42,7 +43,8 @@ await mkdir(join(outputDir, "images", "connection-pairs"), { recursive: true })
 await mkdir(join(outputDir, "images", "routed"), { recursive: true })
 
 const jsonlPath = join(outputDir, "dataset.jsonl")
-await writeFile(jsonlPath, "", "utf8")
+const existingRows = await loadExistingRows(jsonlPath)
+const rows: Array<Record<string, unknown>> = []
 
 let solvedCount = 0
 let attempts = 0
@@ -54,6 +56,18 @@ while (solvedCount < sampleCount && attempts < maxAttempts) {
   const sampleIndex = solvedCount + 1
   const pairCount = getOrCreatePairCount(sampleIndex)
   const problemId = `sample-${sampleIndex.toString().padStart(6, "0")}`
+
+  const routedPngPath = join(outputDir, "images", "routed", `${problemId}.png`)
+  if (existsSync(routedPngPath)) {
+    const existingRow = existingRows.get(problemId)
+    if (existingRow) {
+      rows.push(existingRow)
+    }
+    solvedCount += 1
+    console.log(`skip ${problemId} (already exists) (${solvedCount}/${sampleCount})`)
+    continue
+  }
+
   let problem: GeneratedProblem
   try {
     problem = generateProblem({
@@ -98,9 +112,15 @@ while (solvedCount < sampleCount && attempts < maxAttempts) {
     ...result.row,
   }
 
-  await appendFile(jsonlPath, `${JSON.stringify(row)}\n`, "utf8")
+  rows.push(row)
   console.log(`ok ${problemId} (${solvedCount}/${sampleCount})`)
 }
+
+await writeFile(
+  jsonlPath,
+  `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`,
+  "utf8",
+)
 
 const metadata = {
   created_at: new Date().toISOString(),
@@ -160,4 +180,21 @@ function getOrCreatePairCount(sampleIndex: number): number {
 
 function randomInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min
+}
+
+async function loadExistingRows(
+  path: string,
+): Promise<Map<string, Record<string, unknown>>> {
+  const map = new Map<string, Record<string, unknown>>()
+  if (!existsSync(path)) return map
+  const content = await readFile(path, "utf8")
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    try {
+      const row = JSON.parse(trimmed) as Record<string, unknown>
+      if (typeof row.id === "string") map.set(row.id, row)
+    } catch {}
+  }
+  return map
 }
